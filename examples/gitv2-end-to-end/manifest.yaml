@@ -59,7 +59,19 @@ content:
     - repository: Git-V2-test-repo-1
       url: https://github.com/Shnekit/Git-V2-test-repo-1.git
       include:
-        - notebooks/*.ipynb # all notebooks
+        # The notebook sits at the repository ROOT, not under notebooks/, so it is
+        # named exactly rather than globbed. `notebooks/*.ipynb` was correct only
+        # while the organised layout existed; the studio has now pushed its working
+        # tree over main twice, and each push puts the notebook back at the root.
+        #
+        # An exact filename rather than a bare `*.ipynb` glob is deliberate. The
+        # matcher is fnmatch-based, so `*` crosses directory separators and a bare
+        # `*.ipynb` would deploy every notebook anywhere in the tree — including
+        # whatever the next studio push happens to drop at the root. This
+        # repository has already carried a broken root notebook that could not
+        # parse. Name the file, and add a line when a second notebook is genuinely
+        # wanted.
+        - sample_notebook.ipynb
         # No Query Book pattern: the repository no longer contains a .sqlnb.
         # Query-book-for-git-v2.sqlnb was removed when the studio pushed its
         # working tree over the organised layout. Restore a pattern here if a
