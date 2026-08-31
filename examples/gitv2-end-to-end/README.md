@@ -91,29 +91,35 @@ are actively editing. The stage stays in the manifest so `describe` can target i
 Its own README covers the artifact formats and per-type promotion caveats.
 
 ```text
-notebooks/    ported-notebook.ipynb, sales-summary.ipynb
-querybooks/   Query-book-for-git-v2.sqlnb
-jobs/         VETL-for-git/{.vetl,.py,.json}
-workflows/    sample_notebook_workflow.yaml, demo.yaml
+notebooks/    sample_notebook.ipynb
+jobs/         demo-vtel/{.vetl,.py,.json}
+workflows/    sample_workflow.yaml
 README.md, .gitignore          ← not deployed
-ported-notebook.ipynb          ← root duplicate, not deployed (see below)
 ```
 
-`notebooks/` and `querybooks/` are that repository's convention, not Git V2's. When you
-track an artifact in the SMUS UI you cannot choose a folder, so notebooks and Query
-Books arrive at the repository root and must be moved by hand in the pull request — or
-the `include` patterns will not match them.
+`notebooks/` is that repository's convention, not Git V2's. When you track an artifact
+in the SMUS UI you cannot choose a folder, so notebooks and Query Books arrive at the
+repository root and must be moved by hand in the pull request — or the `include`
+patterns will not match them.
 
-That root `ported-notebook.ipynb` is the constraint happening for real: it was pushed
-from the studio after the same notebook had already been organised into `notebooks/`, so
-the repository now holds two copies. `notebooks/*.ipynb` matches only the organised one,
-so the duplicate is never deployed. Anchored patterns are what keep this survivable —
-a bare `*.ipynb` would deploy both.
+> **⚠️ The studio can overwrite the organised layout wholesale.** Commit `2bba440`
+> ("sample commit") pushed the dev project's working tree over `main`, which deleted
+> `notebooks/`, `querybooks/`, `jobs/VETL-for-git/` and three of the four workflows
+> — `sample_notebook_workflow.yaml`, `demo.yaml` and `demo1.yaml` — and left
+> `sample_notebook.ipynb` at the repository root. The layout above is the state after
+> that push plus the repairs in `47449ca` and `689176a`. Everything deleted is
+> recoverable from commit `60b6942`.
+>
+> This is worth understanding before trusting a Git V2 push: it publishes the
+> project's tree, not a diff, so files organised in git but absent from the project
+> are removed. The `include` patterns are anchored, so anything the push relocates to
+> the root silently stops deploying rather than failing loudly.
 
-`workflows/demo.yaml` is a minimal single-task DAG (one `EmptyOperator`) authored in the
-studio's workflow editor; the `# {"Airflow-task":{...}}` comment on its first line is
-that editor's canvas layout. It exists to show that a second workflow needs two
-declarations, not one.
+The sections below on run results and on `VETL-for-git` describe the repository as it
+stood before `2bba440`. They are kept as history — the constraints they document are
+unchanged — but the filenames no longer exist. `demo-vtel.py` has the identical
+hardcoded-source defect that `VETL-for-git.py` was fixed for, and has not yet been
+fixed; see the application repository's README.
 
 ## How Direct Deploy Works
 
@@ -152,6 +158,55 @@ which registers every entry under `content.workflows`. Naming one workflow filte
 just that one and leaves the rest unregistered with no warning, so omit it unless you
 specifically want a subset.
 
+#### Registered names are project-qualified
+
+The name in the project's Workflows list is not the `dag_id`. `_generate_workflow_name()`
+builds it as `<applicationName>_<projectName>_<dagId>`, hyphens replaced with underscores:
+
+```text
+GitV2EndToEnd_gitv2_ml_test_sample_workflow
+GitV2EndToEnd_gitv2_ml_prod_sample_workflow
+```
+
+That prefix is load-bearing. Serverless Airflow workflows are account-and-region scoped
+(`arn:aws:airflow-serverless:<region>:<account>:workflow/<name>`), so a bare `dag_id`
+can exist only once per account. Without the project in the name, test and prod would
+contend for one workflow and each deploy would overwrite the other.
+
+A workflow authored in the studio's visual editor and tracked through Git V2 is registered
+by SMUS under its `dag_id` alone, with no prefix, and shows a branch badge in the
+Workflows list. So the same DAG can appear twice under different names — once as the
+studio's `demo`, once as the CLI's `GitV2EndToEnd_<project>_demo` — because the two were
+created by different systems. Deploying a DAG that already exists as a studio-tracked
+workflow does not update it; it creates a second, project-qualified one.
+
+#### Every project sees every workflow
+
+Expect the prod project's Workflows page to list the test project's workflows, and vice
+versa. Nothing is misconfigured. Serverless Airflow workflows are account-and-region
+scoped resources — there is no project in the ARN:
+
+```text
+arn:aws:airflow-serverless:<region>:<account>:workflow/<name>
+```
+
+`ListWorkflows` therefore returns everything in the account. The CLI narrows client-side
+by tag: `monitor` keeps only workflows whose `Pipeline` matches `applicationName` and
+whose `Target` matches the project name, which is why `monitor --targets prod` reports one
+workflow while the console shows several. `workflow.create` tags each workflow with
+`Pipeline`, `Target`, `STAGE`, `CreatedBy`, `AmazonDataZoneDomain` and
+`AmazonDataZoneProject`, so the information needed to scope a view is present — the
+console's project page just does not use it, and all three projects share one domain
+anyway.
+
+The practical consequence: **the project-qualified name buys attribution, not isolation.**
+It stops stages overwriting each other's workflow. It does not stop a prod user from
+seeing, or potentially running, the test workflow. Real separation between stages needs
+separate AWS accounts — the same conclusion the [access scope](#setup) note reaches for
+Git connections. Three projects in one account and one domain is fine for demonstrating
+promotion mechanics, which is all this example claims to do, but it is not a production
+boundary.
+
 ### Selecting files with `include`
 
 Without `include` the whole repository is copied, `README.md` and all. Patterns match
@@ -159,7 +214,7 @@ the path relative to the repository root:
 
 | Form | Example |
 | --- | --- |
-| Exact file | `notebooks/sales-summary.ipynb` |
+| Exact file | `notebooks/sample_notebook.ipynb` |
 | Directory prefix | `notebooks` or `notebooks/` |
 | Recursive prefix | `jobs/**` |
 | Glob in a directory | `notebooks/*.ipynb` |
@@ -168,7 +223,7 @@ the path relative to the repository root:
 `exclude` applies after `include`.
 
 > **⚠️ `*` crosses directory separators**, unlike a shell glob — the matcher is
-> `fnmatch`-based, so a bare `*.ipynb` also matches `notebooks/sales-summary.ipynb`.
+> `fnmatch`-based, so a bare `*.ipynb` also matches `notebooks/sample_notebook.ipynb`.
 > Anchor the pattern when you mean one directory only.
 
 The manifest uses patterns for notebooks, Query Books and jobs so newly tracked
@@ -364,8 +419,41 @@ Pre-existing bugs. None block a deploy.
 
 ### Runtime failures to expect
 
-- **`run_vetl_job` fails when the DAG runs.** `VETL-for-git.py` hardcodes its source as `.load("s3://amazon-sagemaker-<account>-<region>-<projectId>/shared/")` — a bucket in the project where the job was authored, in a different Region. The Glue job is created and started correctly; the Spark read reaches for another environment. Left visible because it is the genuine promotion problem, not an example bug.
 - **The Query Book is copied but never runs.** No Airflow operator in this CLI consumes `.sqlnb`. Query Books run from the Query Editor in the SMUS UI.
+- **The Visual ETL `.vetl` and `.json` are copied but never read.** Only the `.py` participates in the run — see below.
+
+### Visual ETL promotes as a script, not as a visual job
+
+`run_vetl_job` used to fail on every stage but the one it was authored in.
+`VETL-for-git.py` hardcoded `.load("s3://amazon-sagemaker-<account>-<region>-<projectId>/shared/")`,
+so the Glue job was created and started correctly in the target project and then read
+back into the authoring environment.
+
+The script now takes its source as a `--SOURCE_PATH` job argument, supplied by the DAG
+from `{proj.connection.default.s3_shared.s3Uri}` — the same `script_args` pattern
+`examples/analytic-workflow/dashboard-glue-quick/covid_etl_workflow.yaml` uses. Because
+DAG YAML *is* resolved per stage by `ContextResolver` at `workflow.create` time, this
+needs no CLI change.
+
+What that does not fix is the artifact. `VETL-for-git.json` pins the authoring
+account's execution role ARN, both `datazone-glue-network-connection-*-dev` names, the
+`TempDir` and `spark-event-logs-path` buckets, and a `--conf` blob carrying
+`glue.account-id`, `client.region` and `openlineage.transport.domainId`. The `.vetl`
+embeds the original path in three places plus a Region-pinned `glueJobArn`. Both are
+copied verbatim and read by nothing — the Glue job is built from `script_location` and
+the DAG's `create_job_kwargs`.
+
+So the job is promotable only by ceasing to be a visual job. Re-opening it in the
+Visual ETL editor regenerates the `.py` from the `.vetl` and discards the
+parameterization.
+
+Making the visual asset promotable is a CLI change, not a config change. `ContextResolver`
+is the only thing that substitutes `{brace}` placeholders, and its single live caller is
+the `workflow.create` bootstrap handler, which resolves DAG YAMLs in place in S3 after
+deployment. Git content takes a different path — `deployment.deploy_files` shells out to
+`aws s3 sync`, byte-for-byte. Closing the gap means a new bootstrap action alongside
+`workflow.create` that reads the deployed `.json`, rewrites the environment-specific
+fields against the target, and calls Glue `create_job`/`update_job`.
 
 ### The real promotion obstacle
 

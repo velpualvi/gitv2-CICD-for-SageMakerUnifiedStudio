@@ -59,35 +59,45 @@ content:
     - repository: Git-V2-test-repo-1
       url: https://github.com/Shnekit/Git-V2-test-repo-1.git
       include:
-        - notebooks/*.ipynb                 # all notebooks
-        - querybooks/*.sqlnb                # all Query Books
-        - jobs/**                           # Visual ETL: .py, .vetl and .json together
+        - notebooks/*.ipynb # all notebooks
+        # No Query Book pattern: the repository no longer contains a .sqlnb.
+        # Query-book-for-git-v2.sqlnb was removed when the studio pushed its
+        # working tree over the organised layout. Restore a pattern here if a
+        # Query Book comes back — and note the studio saved its replacement as
+        # .ipynb, so a `*.sqlnb` glob would not have matched it.
+        - jobs/** # Visual ETL: .py, .vetl and .json together
         # Workflows are named individually rather than globbed. Each one has to be
         # declared under content.workflows below and registered by a
         # workflow.create bootstrap action, so a glob here would copy YAML for
         # workflows that are never registered — a file in S3 doing nothing.
         # Adding a workflow is a deliberate two-line change: this list, and the
         # content.workflows entry.
-        - workflows/sample_notebook_workflow.yaml
-        - workflows/demo.yaml
+        - workflows/sample_workflow.yaml
 
   # Declares which workflow this application deploys. The DAG definition itself
   # lives in the repository above, at workflows/sample_notebook_workflow.yaml —
   # nothing is duplicated here. `workflowName` must match the YAML's top-level key
   # or its dag_id, which is how _find_dag_files_in_s3() identifies the file.
   #
-  # sample_notebook_workflow is promotable: it uses {brace} placeholders that the
-  # CLI resolves per stage at registration. The repository previously also held
+  # sample_workflow is promotable: it uses {brace} placeholders that the CLI
+  # resolves per stage at registration.
+  #
+  # Three workflows were declared here previously and all three are gone, deleted
+  # when the studio pushed its working tree over the organised layout:
+  # sample_notebook_workflow, demo and demo1. Earlier still the repository held
   # EMR-S-test.yaml, which pinned an EMR Serverless application_id and an
   # execution_role_arn in a different AWS account and so could not run outside its
-  # origin environment. It was removed for that reason.
+  # origin environment; it was removed for that reason. All are recoverable from
+  # commit 60b6942 if they are wanted back — declaring a workflow whose YAML is
+  # absent is not fatal, but it makes every deploy print
+  # "⚠️ Workflow YAML not found".
   #
   # ⚠️ Declaring the workflow here does not create it. Registration is the
   # `workflow.create` bootstrap action on each stage below.
   workflows:
-    - workflowName: sample_notebook_workflow
-      connectionName: default.workflow_serverless
-    - workflowName: demo
+    # Authored in the Visual workflow editor, then edited for promotability — see
+    # the header of workflows/sample_workflow.yaml for what had to change.
+    - workflowName: sample_workflow
       connectionName: default.workflow_serverless
 
 # Stages. `dev` is the authoring project and the content source: developers get
